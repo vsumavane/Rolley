@@ -1,45 +1,270 @@
 import { config } from 'dotenv';
-import { Client, GatewayIntentBits, GuildMember, TextChannel } from 'discord.js';
+import {
+    Client,
+    GatewayIntentBits,
+    GuildMember,
+    TextChannel,
+    MessageReaction,
+    User,
+    PartialMessageReaction,
+    PartialUser,
+    EmbedBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    ComponentType,
+    MessageActionRowComponentBuilder
+} from 'discord.js';
 
 config();
 
-// Add GuildMembers to your intents
+interface RoleConfig {
+    emoji: string;
+    roleName: string;
+    category: string;
+    verificationQuestion?: {
+        question: string;
+        options: string[];
+        correctAnswer: string;
+    };
+}
+
+const ROLE_CONFIGS: RoleConfig[] = [
+    {
+        emoji: '💻',
+        roleName: '🧠 Logic Lords',
+        category: 'Software Development',
+        verificationQuestion: {
+            question: 'What is the time complexity of binary search?',
+            options: ['O(1)', 'O(log n)', 'O(n)', 'O(n²)'],
+            correctAnswer: 'O(log n)'
+        }
+    },
+    {
+        emoji: '🎮',
+        roleName: '👾 Game On',
+        category: 'Gaming',
+        verificationQuestion: {
+            question: 'Which gaming platform do you primarily use?',
+            options: ['PC', 'PlayStation', 'Xbox', 'Nintendo'],
+            correctAnswer: 'PC'
+        }
+    },
+    {
+        emoji: '🎬',
+        roleName: '📽️ Cinephile',
+        category: 'Movies & Series',
+        verificationQuestion: {
+            question: 'What is your favorite movie genre?',
+            options: ['Action', 'Comedy', 'Drama', 'Sci-Fi'],
+            correctAnswer: 'Drama'
+        }
+    },
+    {
+        emoji: '🎓',
+        roleName: '💼 Parul Alumni',
+        category: 'Education',
+        verificationQuestion: {
+            question: 'What is the fare of chhagda from waghodia chowkdi to parul university?',
+            options: ['Rs. 20', 'Rs. 25', 'Rs. 30', 'Rs. 35'],
+            correctAnswer: 'Rs. 30'
+        }
+    }
+];
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.GuildMessageReactions
     ]
 });
 
-const onePieceGreetings: string[] = [
-    `Yohohoho! Welcome aboard {username}! Let's make this journey a grand adventure! 🏴‍☠️`,
-    `SUUUUPER welcome to our crew, {username}! 🚢`,
-    `Shishishi! Hey {username}, welcome to our nakama! 🍖`,
-    `Welcome to the Grand Line, {username}! May your adventures be legendary! ⚓`,
-    `Ora ora! {username} has joined our pirate crew! 🗡️`,
-    `A new nakama appears! Welcome {username}! Let's set sail together! ⛵`
-];
+let roleSelectionMessageId: string | null = null;
 
-client.on('guildMemberAdd', async (member: GuildMember): Promise<void> => {
-    // Find the welcome channel
-    const welcomeChannel = member.guild.channels.cache.find(
-        (channel): channel is TextChannel => channel.name === '👋-welcome'
+// Create and send the role selection message
+async function createRoleSelectionMessage(channel: TextChannel): Promise<void> {
+    // Check for existing message
+    const messages = await channel.messages.fetch({ limit: 10 });
+    const existingMessage = messages.find(msg => 
+        msg.author.id === client.user?.id && 
+        msg.embeds.length > 0 && 
+        msg.embeds[0].title === 'Role Selection'
     );
 
-    if (!welcomeChannel) return;
-
-    const randomGreeting = onePieceGreetings[Math.floor(Math.random() * onePieceGreetings.length)]
-        .replace('{username}', member.user.username);
-    
-    try {
-        await welcomeChannel.send(randomGreeting);
-    } catch (error) {
-        console.error('Error sending welcome message:', error);
+    if (existingMessage) {
+        console.log('Found existing role selection message');
+        roleSelectionMessageId = existingMessage.id;
+        return;
     }
+
+    const embed = new EmbedBuilder()
+        .setTitle('Role Selection')
+        .setDescription('React with the emojis below to get your roles!')
+        .setColor('#0099ff');
+
+    ROLE_CONFIGS.forEach(config => {
+        embed.addFields({
+            name: `${config.emoji} ${config.roleName}`,
+            value: `Category: ${config.category}`
+        });
+    });
+
+    const message = await channel.send({ embeds: [embed] });
+    roleSelectionMessageId = message.id;
+    
+    // Add reactions
+    for (const config of ROLE_CONFIGS) {
+        await message.react(config.emoji);
+    }
+}
+
+// Handle role verification through DM
+async function handleRoleVerification(
+    user: User,
+    roleConfig: RoleConfig,
+    member: GuildMember
+): Promise<void> {
+    if (!roleConfig.verificationQuestion) return;
+
+    const { question, options, correctAnswer } = roleConfig.verificationQuestion;
+
+    const embed = new EmbedBuilder()
+        .setTitle(`Verification for ${roleConfig.roleName}`)
+        .setDescription(question)
+        .setColor('#0099ff');
+
+    const buttons = options.map((option, index) => 
+        new ButtonBuilder()
+            .setCustomId(`verify_${index}`)
+            .setLabel(option)
+            .setStyle(ButtonStyle.Primary)
+    );
+
+    const row = new ActionRowBuilder<MessageActionRowComponentBuilder>()
+        .addComponents(buttons);
+
+    try {
+        const dmChannel = await user.createDM();
+        const verificationMessage = await dmChannel.send({
+            embeds: [embed],
+            components: [row]
+        });
+
+        const filter = (i: any) => i.user.id === user.id;
+        const collector = verificationMessage.createMessageComponentCollector({
+            filter,
+            time: 300000, // 5 minutes
+            max: 1
+        });
+
+        collector.on('collect', async (interaction) => {
+            const selectedOption = options[parseInt(interaction.customId.split('_')[1])];
+            
+            if (selectedOption === correctAnswer) {
+                const role = member.guild.roles.cache.find(r => r.name === roleConfig.roleName);
+                if (role) {
+                    await member.roles.add(role);
+                    await interaction.reply({
+                        content: `✅ Verification successful! You've been given the ${roleConfig.roleName} role.`,
+                        flags: 64 // 64 is the flag for ephemeral messages
+                    });
+                }
+            } else {
+                await interaction.reply({
+                    content: '❌ Incorrect answer. Please try again later.',
+                    flags: 64
+                });
+            }
+        });
+
+        collector.on('end', async (collected) => {
+            if (collected.size === 0) {
+                await dmChannel.send('Verification timed out. Please try again.');
+            }
+        });
+    } catch (error) {
+        console.error('Error in role verification:', error);
+    }
+}
+
+// Handle reaction events
+client.on('messageReactionAdd', async (reaction: MessageReaction | PartialMessageReaction, user: User | PartialUser) => {
+    if (user.bot) return;
+    if (reaction.partial) {
+        try {
+            await reaction.fetch();
+        } catch (error) {
+            console.error('Error fetching reaction:', error);
+            return;
+        }
+    }
+
+    const message = reaction.message;
+    if (!message.guild || !(message.channel instanceof TextChannel) || message.channel.name !== '😋-self-roles') return;
+    
+    // Only process reactions on the role selection message
+    if (message.id !== roleSelectionMessageId) return;
+
+    const member = message.guild.members.cache.get(user.id);
+    if (!member) return;
+
+    const roleConfig = ROLE_CONFIGS.find(config => config.emoji === reaction.emoji.name);
+    if (!roleConfig) return;
+
+    await handleRoleVerification(user as User, roleConfig, member);
+});
+
+// Initialize bot
+client.once('ready', () => {
+    console.log(`Logged in as ${client.user?.tag}`);
+    
+    // Find the self-roles channel and create the role selection message
+    const guild = client.guilds.cache.first();
+    if (!guild) {
+        console.error('No guild found! Make sure the bot is in a server.');
+        return;
+    }
+
+    const channel = guild.channels.cache.find(
+        (ch): ch is TextChannel => ch.name === '😋-self-roles' && ch.type === 0
+    );
+    
+    if (!channel) {
+        console.error('Could not find the self-roles channel. Please create a channel named "😋-self-roles"');
+        return;
+    }
+
+    // Check if roles exist
+    const missingRoles = ROLE_CONFIGS.filter(config => 
+        !guild.roles.cache.some(role => role.name === config.roleName)
+    );
+
+    if (missingRoles.length > 0) {
+        console.error('Missing roles:', missingRoles.map(r => r.roleName).join(', '));
+        console.error('Please create these roles in your server');
+        return;
+    }
+
+    createRoleSelectionMessage(channel).catch(error => {
+        console.error('Error creating role selection message:', error);
+    });
+});
+
+// Add error handlers
+client.on('error', error => {
+    console.error('Discord client error:', error);
+});
+
+process.on('unhandledRejection', error => {
+    console.error('Unhandled promise rejection:', error);
 });
 
 client.login(process.env.TOKEN)
-    .then(() => console.log('Bot is online!'))
-    .catch((error: Error) => console.error('Error logging in:', error));
+    .catch((error: Error) => {
+        console.error('Failed to login:', error);
+        process.exit(1);
+    });
