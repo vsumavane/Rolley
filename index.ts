@@ -12,9 +12,9 @@ import {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
-    ComponentType,
     MessageActionRowComponentBuilder
 } from 'discord.js';
+import { generateRoleQuestion } from './src/utils/gemini.js';
 
 config();
 
@@ -22,53 +22,28 @@ interface RoleConfig {
     emoji: string;
     roleName: string;
     category: string;
-    verificationQuestion?: {
-        question: string;
-        options: string[];
-        correctAnswer: string;
-    };
 }
 
 const ROLE_CONFIGS: RoleConfig[] = [
     {
         emoji: '💻',
         roleName: '🧠 Logic Lords',
-        category: 'Software Development',
-        verificationQuestion: {
-            question: 'What is the time complexity of binary search?',
-            options: ['O(1)', 'O(log n)', 'O(n)', 'O(n²)'],
-            correctAnswer: 'O(log n)'
-        }
+        category: 'Software Development'
     },
     {
         emoji: '🎮',
         roleName: '👾 Game On',
-        category: 'Gaming',
-        verificationQuestion: {
-            question: 'Which gaming platform do you primarily use?',
-            options: ['PC', 'PlayStation', 'Xbox', 'Nintendo'],
-            correctAnswer: 'PC'
-        }
+        category: 'Gaming'
     },
     {
         emoji: '🎬',
         roleName: '📽️ Cinephile',
-        category: 'Movies & Series',
-        verificationQuestion: {
-            question: 'What is your favorite movie genre?',
-            options: ['Action', 'Comedy', 'Drama', 'Sci-Fi'],
-            correctAnswer: 'Drama'
-        }
+        category: 'Movies & Series'
     },
     {
         emoji: '🎓',
         roleName: '💼 Parul Alumni',
-        category: 'Education',
-        verificationQuestion: {
-            question: 'What is the fare of chhagda from waghodia chowkdi to parul university?',
-            options: ['Rs. 20', 'Rs. 25', 'Rs. 30', 'Rs. 35'],
-            correctAnswer: 'Rs. 30'
-        }
+        category: 'Education'
     }
 ];
 
@@ -128,26 +103,25 @@ async function handleRoleVerification(
     roleConfig: RoleConfig,
     member: GuildMember
 ): Promise<void> {
-    if (!roleConfig.verificationQuestion) return;
-
-    const { question, options, correctAnswer } = roleConfig.verificationQuestion;
-
-    const embed = new EmbedBuilder()
-        .setTitle(`Verification for ${roleConfig.roleName}`)
-        .setDescription(question)
-        .setColor('#0099ff');
-
-    const buttons = options.map((option, index) => 
-        new ButtonBuilder()
-            .setCustomId(`verify_${index}`)
-            .setLabel(option)
-            .setStyle(ButtonStyle.Primary)
-    );
-
-    const row = new ActionRowBuilder<MessageActionRowComponentBuilder>()
-        .addComponents(buttons);
-
     try {
+        // Generate question using Gemini
+        const questionData = await generateRoleQuestion(roleConfig.roleName, roleConfig.category);
+
+        const embed = new EmbedBuilder()
+            .setTitle(`Verification for ${roleConfig.roleName}`)
+            .setDescription(questionData.question)
+            .setColor('#0099ff');
+
+        const buttons = questionData.options.map((option, index) => 
+            new ButtonBuilder()
+                .setCustomId(`verify_${index}`)
+                .setLabel(option)
+                .setStyle(ButtonStyle.Primary)
+        );
+
+        const row = new ActionRowBuilder<MessageActionRowComponentBuilder>()
+            .addComponents(buttons);
+
         const dmChannel = await user.createDM();
         const verificationMessage = await dmChannel.send({
             embeds: [embed],
@@ -162,15 +136,15 @@ async function handleRoleVerification(
         });
 
         collector.on('collect', async (interaction) => {
-            const selectedOption = options[parseInt(interaction.customId.split('_')[1])];
+            const selectedOption = questionData.options[parseInt(interaction.customId.split('_')[1])];
             
-            if (selectedOption === correctAnswer) {
+            if (selectedOption === questionData.correctAnswer) {
                 const role = member.guild.roles.cache.find(r => r.name === roleConfig.roleName);
                 if (role) {
                     await member.roles.add(role);
                     await interaction.reply({
                         content: `✅ Verification successful! You've been given the ${roleConfig.roleName} role.`,
-                        flags: 64 // 64 is the flag for ephemeral messages
+                        flags: 64
                     });
                 }
             } else {
@@ -188,6 +162,7 @@ async function handleRoleVerification(
         });
     } catch (error) {
         console.error('Error in role verification:', error);
+        await user.send('Sorry, there was an error processing your role verification. Please try again later.');
     }
 }
 
