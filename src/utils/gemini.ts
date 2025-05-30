@@ -38,7 +38,22 @@ Guidelines:
 
 Important: Return ONLY the raw JSON object, no markdown, no code blocks, no additional text.`;
 
-        const response = await genAI.models.generateContent({model:'gemini-2.0-flash',contents:prompt});
+        const response = await genAI.models.generateContent({
+            model:'gemini-2.0-flash',
+            contents:prompt,
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: 'object',
+                    properties: {
+                        question: { type: 'string' },
+                        options: { type: 'array', items: { type: 'string' }, minItems: 4, maxItems: 4 },
+                        correctAnswer: { type: 'string' }
+                    },
+                    required: ['question', 'options', 'correctAnswer']
+                }
+            }
+        });
         const text = response.text;
 
         if(!text) throw new Error('response is empty')
