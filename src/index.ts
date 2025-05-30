@@ -14,7 +14,7 @@ import {
     ButtonStyle,
     MessageActionRowComponentBuilder
 } from 'discord.js';
-import { generateRoleQuestion } from './src/utils/gemini.js';
+import { generateRoleQuestion } from './utils/gemini.js';
 
 config();
 
