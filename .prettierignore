@@ -1,0 +1,12 @@
+# Ignore build directories:
+build
+# Ignore distribution directories:  
+dist
+# Ignore node modules:
+node_modules
+# Ignore environment variables:
+.env
+# Ignore logs:
+logs
+# Ignore coverage reports:
+coverage
